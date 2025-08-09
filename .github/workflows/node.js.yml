@@ -56,4 +56,4 @@ jobs:
             pm2 restart all
 
       - name: Remove private key file
-        run: rm loginsystem.pem
+        run: rm key.pem
