@@ -23,14 +23,14 @@ jobs:
         working-directory: ./frontend
 
       - name: Build Frontend Project
-        run: CI=false npm run build
+        run: npm run build
         working-directory: ./frontend
 
-      # 4. Check build folder (debugging safeguard)
+      # 4. Verify dist folder (Vite output)
       - name: Verify Frontend Build Output
-        run: ls -la ./frontend/build
+        run: ls -la ./frontend/dist
 
-      # 5. Prepare SSH key
+      # 5. Prepare SSH Key
       - name: Prepare SSH Key
         run: |
           echo "${{ secrets.EC2_PRIVATE_KEY }}" > key.pem
@@ -39,10 +39,12 @@ jobs:
       # 6. Copy backend & frontend to EC2
       - name: Copy Files to EC2
         run: |
+          # Copy backend
           scp -o StrictHostKeyChecking=no -i key.pem -r ./backend ubuntu@13.204.109.107:~/backend
-          scp -o StrictHostKeyChecking=no -i key.pem -r ./frontend/build ubuntu@13.204.109.107:~/frontend_build
+          # Copy frontend dist folder (Vite build)
+          scp -o StrictHostKeyChecking=no -i key.pem -r ./frontend/dist ubuntu@13.204.109.107:~/frontend_dist
 
-      # 7. Install backend deps & restart app
+      # 7. Install backend deps & restart app using PM2
       - name: Install Backend and Restart PM2
         uses: appleboy/ssh-action@master
         with:
@@ -53,11 +55,10 @@ jobs:
           script: |
             cd ~/backend
             npm ci
-            # start backend using PM2 (adjust entry file if not index.js)
             pm2 start index.js --name backend || pm2 restart backend
             pm2 save
             pm2 status
 
-      # 8. Cleanup key
+      # 8. Cleanup SSH Key
       - name: Remove private key
         run: rm -f key.pem
