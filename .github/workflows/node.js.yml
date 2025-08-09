@@ -10,27 +10,34 @@ jobs:
       - name: Clone Repo
         uses: actions/checkout@v3
 
-      - name: Configure Node
+      - name: Configure Node.js
         uses: actions/setup-node@v2
         with:
           node-version: "18.x"
 
-      - name: Install Dependencies
-        run: npm i
+      - name: Install Frontend Dependencies
+        run: npm ci
         working-directory: ./frontend
 
-      - name: Build Project
+      - name: Build Frontend Project
         run: CI=false npm run build
         working-directory: ./frontend
 
-      - name: Copy Build to EC2
+      - name: Prepare SSH Key
         run: |
           echo "${{ secrets.EC2_PRIVATE_KEY }}" > key.pem
           chmod 400 key.pem
-          scp -o StrictHostKeyChecking=no -i key.pem -r ./backend/ ubuntu@13.204.109.107:~/
-          scp -o StrictHostKeyChecking=no -i key.pem -r ./frontend/build ubuntu@13.204.109.107:~/backend/
+        shell: bash
 
-      - name: Install Backend Dependencies and Start Backend
+      - name: Copy Backend and Frontend Build to EC2
+        run: |
+          # Copy backend source code
+          scp -o StrictHostKeyChecking=no -i key.pem -r ./backend ubuntu@13.204.109.107:~/backend/
+          # Copy built frontend
+          scp -o StrictHostKeyChecking=no -i key.pem -r ./frontend/build ubuntu@13.204.109.107:~/frontend_build/
+        shell: bash
+
+      - name: Install Backend Dependencies & Start Backend
         uses: appleboy/ssh-action@master
         with:
           host: 13.204.109.107
@@ -38,22 +45,21 @@ jobs:
           key: ${{ secrets.EC2_PRIVATE_KEY }}
           port: 22
           script: |
-            cd ~/backend # Assuming your backend is in the 'backend' directory
-            npm install
-            pm2 start index.js # Replace 'server.js' with your backend entry point
-            pm2 save # Save the PM2 process list    
+            cd ~/backend
+            npm ci
+            pm2 startOrReload ecosystem.config.js --env production
+            pm2 save
 
-      - name: Restart PM2
+      - name: Restart PM2 (Status Check)
         uses: appleboy/ssh-action@master
         with:
           host: 13.204.109.107
           username: ubuntu
-          port: 22
           key: ${{ secrets.EC2_PRIVATE_KEY }}
+          port: 22
           script: |
-            cd ~/server
-            pm2 status # Check PM2 status for debugging
-            pm2 restart all
+            pm2 status
 
-      - name: Remove private key file
-        run: rm key.pem
+      - name: Cleanup SSH Key
+        run: rm -f key.pem
+        shell: bash
