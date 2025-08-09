@@ -3,18 +3,21 @@ on:
     branches: ["main"]
 
 jobs:
-  build:
+  build-and-deploy:
     runs-on: ubuntu-latest
 
     steps:
+      # 1. Clone repository
       - name: Clone Repo
         uses: actions/checkout@v3
 
+      # 2. Setup Node.js
       - name: Configure Node.js
         uses: actions/setup-node@v2
         with:
           node-version: "18.x"
 
+      # 3. Install & build frontend
       - name: Install Frontend Dependencies
         run: npm ci
         working-directory: ./frontend
@@ -23,21 +26,24 @@ jobs:
         run: CI=false npm run build
         working-directory: ./frontend
 
+      # 4. Check build folder (debugging safeguard)
+      - name: Verify Frontend Build Output
+        run: ls -la ./frontend/build
+
+      # 5. Prepare SSH key
       - name: Prepare SSH Key
         run: |
           echo "${{ secrets.EC2_PRIVATE_KEY }}" > key.pem
           chmod 400 key.pem
-        shell: bash
 
-      - name: Copy Backend and Frontend Build to EC2
+      # 6. Copy backend & frontend to EC2
+      - name: Copy Files to EC2
         run: |
-          # Copy backend source code
-          scp -o StrictHostKeyChecking=no -i key.pem -r ./backend ubuntu@13.204.109.107:~/backend/
-          # Copy built frontend
-          scp -o StrictHostKeyChecking=no -i key.pem -r ./frontend/build ubuntu@13.204.109.107:~/frontend_build/
-        shell: bash
+          scp -o StrictHostKeyChecking=no -i key.pem -r ./backend ubuntu@13.204.109.107:~/backend
+          scp -o StrictHostKeyChecking=no -i key.pem -r ./frontend/build ubuntu@13.204.109.107:~/frontend_build
 
-      - name: Install Backend Dependencies & Start Backend
+      # 7. Install backend deps & restart app
+      - name: Install Backend and Restart PM2
         uses: appleboy/ssh-action@master
         with:
           host: 13.204.109.107
@@ -47,19 +53,11 @@ jobs:
           script: |
             cd ~/backend
             npm ci
-            pm2 startOrReload ecosystem.config.js --env production
+            # start backend using PM2 (adjust entry file if not index.js)
+            pm2 start index.js --name backend || pm2 restart backend
             pm2 save
-
-      - name: Restart PM2 (Status Check)
-        uses: appleboy/ssh-action@master
-        with:
-          host: 13.204.109.107
-          username: ubuntu
-          key: ${{ secrets.EC2_PRIVATE_KEY }}
-          port: 22
-          script: |
             pm2 status
 
-      - name: Cleanup SSH Key
+      # 8. Cleanup key
+      - name: Remove private key
         run: rm -f key.pem
-        shell: bash
